@@ -333,6 +333,10 @@ type CursorChatOptions struct {
 	ConversationID string
 	// SystemPrompt is an optional custom system prompt.
 	SystemPrompt string
+	// MaxMode enables Cursor's Max Mode, extending the context window to the
+	// model's maximum (e.g. 1M tokens). Corresponds to ModelDetails.max_mode
+	// in Cursor's protobuf schema (field 8).
+	MaxMode bool
 	// Timeout overrides the default request timeout.
 	Timeout time.Duration
 }
@@ -351,6 +355,15 @@ func (c *CursorSDKClient) RunChat(ctx context.Context, creds CursorCredentials, 
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 
 	// Build the run request message
+	modelDetails := map[string]any{
+		"modelId":          opts.Model,
+		"displayName":      opts.Model,
+		"displayNameShort": opts.Model,
+	}
+	if opts.MaxMode {
+		modelDetails["max_mode"] = true
+	}
+
 	runMsg := map[string]any{
 		"runRequest": map[string]any{
 			"conversationState": map[string]any{},
@@ -361,11 +374,7 @@ func (c *CursorSDKClient) RunChat(ctx context.Context, creds CursorCredentials, 
 					},
 				},
 			},
-			"modelDetails": map[string]any{
-				"modelId":          opts.Model,
-				"displayName":      opts.Model,
-				"displayNameShort": opts.Model,
-			},
+			"modelDetails":   modelDetails,
 			"requestedModel": map[string]any{
 				"modelId": opts.Model,
 			},
@@ -584,6 +593,15 @@ func (c *CursorSDKClient) RunChatSSE(ctx context.Context, creds CursorCredential
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 
 	// Build the RunSSE request body (plain JSON, server-streaming ConnectRPC)
+	sseModelDetails := map[string]any{
+		"modelId":          opts.Model,
+		"displayName":      opts.Model,
+		"displayNameShort": opts.Model,
+	}
+	if opts.MaxMode {
+		sseModelDetails["max_mode"] = true
+	}
+
 	runReq := map[string]any{
 		"conversationState": map[string]any{},
 		"action": map[string]any{
@@ -593,11 +611,7 @@ func (c *CursorSDKClient) RunChatSSE(ctx context.Context, creds CursorCredential
 				},
 			},
 		},
-		"modelDetails": map[string]any{
-			"modelId":          opts.Model,
-			"displayName":      opts.Model,
-			"displayNameShort": opts.Model,
-		},
+		"modelDetails":   sseModelDetails,
 		"requestedModel": map[string]any{
 			"modelId": opts.Model,
 		},

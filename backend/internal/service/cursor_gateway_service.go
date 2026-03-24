@@ -339,6 +339,7 @@ func (s *CursorGatewayService) forwardNonStreaming(
 		Model:          cursorModel,
 		Prompt:         conversation,
 		ConversationID: stableConversationID(account.ID, cursorModel, conversation),
+		MaxMode:        isCursor1MModel(cursorModel),
 	})
 	if err != nil {
 		s.logger.Error("cursor forward non-streaming failed",
@@ -445,6 +446,7 @@ func (s *CursorGatewayService) forwardStreaming(
 		Model:          cursorModel,
 		Prompt:         conversation,
 		ConversationID: stableConversationID(account.ID, cursorModel, conversation),
+		MaxMode:        isCursor1MModel(cursorModel),
 	})
 	if err != nil {
 		s.logger.Error("cursor forward streaming failed",
@@ -823,6 +825,7 @@ func (s *CursorGatewayService) forwardNonStreamingAsAnthropic(
 		Prompt:         conversation,
 		SystemPrompt:   systemPrompt,
 		ConversationID: stableConversationID(account.ID, cursorModel, conversation),
+		MaxMode:        isCursor1MModel(cursorModel),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s forward_failed: %w", prefix, err)
@@ -942,6 +945,7 @@ func (s *CursorGatewayService) forwardStreamingAsAnthropic(
 		Prompt:         conversation,
 		SystemPrompt:   systemPrompt,
 		ConversationID: stableConversationID(account.ID, cursorModel, conversation),
+		MaxMode:        isCursor1MModel(cursorModel),
 	})
 	if err != nil {
 		writeSSE("error", map[string]any{
