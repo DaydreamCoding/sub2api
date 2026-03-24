@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -98,6 +99,29 @@ func GetCursorCredentialsFromAccount(account *Account) (CursorCredentials, error
 // cursorMachineIDNamespace is a fixed UUID namespace for generating deterministic
 // machine IDs per account. Generated once, never changes.
 var cursorMachineIDNamespace = uuid.MustParse("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+
+// cursorConvIDNamespace is a fixed UUID namespace for generating deterministic
+// conversation IDs per account+prompt, enabling Cursor prompt cache reuse.
+var cursorConvIDNamespace = uuid.MustParse("b2c3d4e5-f6a7-8901-bcde-f12345678901")
+
+// cchPattern matches the dynamic "cch=XXXXX" field in Claude Code's billing header.
+var cchPattern = regexp.MustCompile(`cch=[0-9a-f]+`)
+
+// stableConversationID generates a deterministic conversation ID based on
+// account + prompt prefix hash, enabling Cursor prompt cache reuse.
+// Same account + same system prompt → same conversationId → cache hit.
+func stableConversationID(accountID int64, promptPrefix string) string {
+	// Use first 512 chars of prompt as cache key (covers system prompt identity).
+	truncated := promptPrefix
+	if len(truncated) > 512 {
+		truncated = truncated[:512]
+	}
+	// Strip dynamic per-request fields that would break cache keying:
+	// - "cch=XXXXX" in x-anthropic-billing-header changes every request
+	truncated = cchPattern.ReplaceAllString(truncated, "cch=_")
+	key := fmt.Sprintf("conv:%d:%s", accountID, truncated)
+	return uuid.NewSHA1(cursorConvIDNamespace, []byte(key)).String()
+}
 
 // getCursorCredentials extracts Cursor API credentials from an account.
 // When machine_id / mac_machine_id are not stored, generates deterministic
@@ -292,8 +316,9 @@ func (s *CursorGatewayService) forwardNonStreaming(
 	startTime := time.Now()
 
 	eventsCh, err := client.RunChat(ctx, creds, CursorChatOptions{
-		Model:  cursorModel,
-		Prompt: conversation,
+		Model:          cursorModel,
+		Prompt:         conversation,
+		ConversationID: stableConversationID(account.ID, conversation),
 	})
 	if err != nil {
 		s.logger.Error("cursor forward non-streaming failed",
@@ -397,8 +422,9 @@ func (s *CursorGatewayService) forwardStreaming(
 
 	// Start Cursor streaming
 	eventsCh, err := client.RunChat(ctx, creds, CursorChatOptions{
-		Model:  cursorModel,
-		Prompt: conversation,
+		Model:          cursorModel,
+		Prompt:         conversation,
+		ConversationID: stableConversationID(account.ID, conversation),
 	})
 	if err != nil {
 		s.logger.Error("cursor forward streaming failed",
@@ -773,9 +799,10 @@ func (s *CursorGatewayService) forwardNonStreamingAsAnthropic(
 	startTime := time.Now()
 
 	eventsCh, err := client.RunChat(ctx, creds, CursorChatOptions{
-		Model:        cursorModel,
-		Prompt:       conversation,
-		SystemPrompt: systemPrompt,
+		Model:          cursorModel,
+		Prompt:         conversation,
+		SystemPrompt:   systemPrompt,
+		ConversationID: stableConversationID(account.ID, conversation),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s forward_failed: %w", prefix, err)
@@ -891,9 +918,10 @@ func (s *CursorGatewayService) forwardStreamingAsAnthropic(
 	})
 
 	eventsCh, err := client.RunChat(ctx, creds, CursorChatOptions{
-		Model:        cursorModel,
-		Prompt:       conversation,
-		SystemPrompt: systemPrompt,
+		Model:          cursorModel,
+		Prompt:         conversation,
+		SystemPrompt:   systemPrompt,
+		ConversationID: stableConversationID(account.ID, conversation),
 	})
 	if err != nil {
 		writeSSE("error", map[string]any{
