@@ -107,18 +107,29 @@ var cursorConvIDNamespace = uuid.MustParse("b2c3d4e5-f6a7-8901-bcde-f12345678901
 // cchPattern matches the dynamic "cch=XXXXX" field in Claude Code's billing header.
 var cchPattern = regexp.MustCompile(`cch=[0-9a-f]+`)
 
-// isCursor1MModel checks if a Cursor model explicitly uses 1M context window.
-//
-// Cursor model naming: {base}-{effort}-{thinking}
-//   - effort: high, max (thinking depth, NOT context size)
-//   - thinking: with/without adaptive thinking
-//   - "-1m": explicit 1M context window
-//
-// "Max Mode" is a Cursor IDE UI feature that extends context to 1M,
-// but does NOT change the model name in the API. We can only detect
-// models with explicit "-1m" suffix.
+// isCursor1MModel checks if a Cursor model supports 1M context window.
+// These models require max_mode=true in modelDetails to unlock 1M context,
+// and use longer prefix hash (2048 chars) for better cache key discrimination.
 func isCursor1MModel(cursorModel string) bool {
-	return strings.Contains(cursorModel, "-1m")
+	// Explicit 1M suffix (e.g. claude-4-sonnet-1m)
+	if strings.Contains(cursorModel, "-1m") {
+		return true
+	}
+	// Claude 4.5/4.6 series
+	if strings.HasPrefix(cursorModel, "claude-4.6-") || strings.HasPrefix(cursorModel, "claude-4.5-") {
+		return true
+	}
+	// Gemini 2.5/3/3.1 (Flash & Pro) — all have 1M context window
+	if strings.HasPrefix(cursorModel, "gemini-3.1-") ||
+		strings.HasPrefix(cursorModel, "gemini-3-") ||
+		strings.HasPrefix(cursorModel, "gemini-2.5-") {
+		return true
+	}
+	// GPT-5.4 supports 1M in Max Mode
+	if strings.HasPrefix(cursorModel, "gpt-5.4") {
+		return true
+	}
+	return false
 }
 
 // stableConversationID generates a deterministic conversation ID based on
