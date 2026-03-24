@@ -107,14 +107,34 @@ var cursorConvIDNamespace = uuid.MustParse("b2c3d4e5-f6a7-8901-bcde-f12345678901
 // cchPattern matches the dynamic "cch=XXXXX" field in Claude Code's billing header.
 var cchPattern = regexp.MustCompile(`cch=[0-9a-f]+`)
 
+// isCursor1MModel checks if a Cursor model explicitly uses 1M context window.
+//
+// Cursor model naming: {base}-{effort}-{thinking}
+//   - effort: high, max (thinking depth, NOT context size)
+//   - thinking: with/without adaptive thinking
+//   - "-1m": explicit 1M context window
+//
+// "Max Mode" is a Cursor IDE UI feature that extends context to 1M,
+// but does NOT change the model name in the API. We can only detect
+// models with explicit "-1m" suffix.
+func isCursor1MModel(cursorModel string) bool {
+	return strings.Contains(cursorModel, "-1m")
+}
+
 // stableConversationID generates a deterministic conversation ID based on
 // account + prompt prefix hash, enabling Cursor prompt cache reuse.
 // Same account + same system prompt → same conversationId → cache hit.
-func stableConversationID(accountID int64, promptPrefix string) string {
-	// Use first 512 chars of prompt as cache key (covers system prompt identity).
+// For 1M context models, uses a longer prefix (2048 chars) to better
+// distinguish between large prompts and reduce hash collisions.
+func stableConversationID(accountID int64, cursorModel, promptPrefix string) string {
+	// 1M context models need longer prefix for better cache key discrimination.
+	prefixLen := 512
+	if isCursor1MModel(cursorModel) {
+		prefixLen = 2048
+	}
 	truncated := promptPrefix
-	if len(truncated) > 512 {
-		truncated = truncated[:512]
+	if len(truncated) > prefixLen {
+		truncated = truncated[:prefixLen]
 	}
 	// Strip dynamic per-request fields that would break cache keying:
 	// - "cch=XXXXX" in x-anthropic-billing-header changes every request
@@ -318,7 +338,7 @@ func (s *CursorGatewayService) forwardNonStreaming(
 	eventsCh, err := client.RunChat(ctx, creds, CursorChatOptions{
 		Model:          cursorModel,
 		Prompt:         conversation,
-		ConversationID: stableConversationID(account.ID, conversation),
+		ConversationID: stableConversationID(account.ID, cursorModel, conversation),
 	})
 	if err != nil {
 		s.logger.Error("cursor forward non-streaming failed",
@@ -424,7 +444,7 @@ func (s *CursorGatewayService) forwardStreaming(
 	eventsCh, err := client.RunChat(ctx, creds, CursorChatOptions{
 		Model:          cursorModel,
 		Prompt:         conversation,
-		ConversationID: stableConversationID(account.ID, conversation),
+		ConversationID: stableConversationID(account.ID, cursorModel, conversation),
 	})
 	if err != nil {
 		s.logger.Error("cursor forward streaming failed",
@@ -802,7 +822,7 @@ func (s *CursorGatewayService) forwardNonStreamingAsAnthropic(
 		Model:          cursorModel,
 		Prompt:         conversation,
 		SystemPrompt:   systemPrompt,
-		ConversationID: stableConversationID(account.ID, conversation),
+		ConversationID: stableConversationID(account.ID, cursorModel, conversation),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s forward_failed: %w", prefix, err)
@@ -921,7 +941,7 @@ func (s *CursorGatewayService) forwardStreamingAsAnthropic(
 		Model:          cursorModel,
 		Prompt:         conversation,
 		SystemPrompt:   systemPrompt,
-		ConversationID: stableConversationID(account.ID, conversation),
+		ConversationID: stableConversationID(account.ID, cursorModel, conversation),
 	})
 	if err != nil {
 		writeSSE("error", map[string]any{
